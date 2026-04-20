@@ -49,8 +49,10 @@ def isa_atmosphere(h):
     elif h >= 20000 and h < 32000:
         T = T20 + L_ustr*(h - 20000)
         p = p20 * (T / T20)**(-g0/ (L_ustr* R_air))
-    else:
-        raise ValueError("Altitude exceeds ISA model range (>32 km)")
+    else: # exponential extension above 32km
+        T = T20 + L_ustr*(32000 - 20000)
+        p = p20 * (T / T20)**(-g0/ (L_ustr* R_air)) * np.exp(-g0 * (h - 32000) / (R_air * T))
+    
     rho = p / (R_air * T)
     return T, p, rho
 
@@ -68,7 +70,7 @@ def drag_coefficient(M):
     else:
         return 0.6
 
-H = 8500               # Scale height (m)
+#H = 8500               # Scale height (m)
 
 # Aerodynamic parameters
 #Cd = 0.5               # Drag coefficient
@@ -109,14 +111,14 @@ def rocket_ode(t, y):
 
     # Forces
     #rho = air_density(h)
-    T, p, rho = isa_atmosphere(h) # set temp, pressure and density from ISA
+    T_atm, p_atm, rho = isa_atmosphere(h) # set temp, pressure and density from ISA
 
-    a = np.sqrt(gamma*R_air*T)
+    a = np.sqrt(gamma*R_air*T_atm)
 
-    Ma = v / a
+    Ma = max(v / a, 1e-3)
 
     q = 0.5 * rho * v**2
-    
+
     Cd = drag_coefficient(Ma)
 
     D = 0.5 * rho * Cd * A * v**2
@@ -136,9 +138,17 @@ def rocket_ode(t, y):
     Tx = thrust * np.cos(theta)
     Tz = thrust * np.sin(theta)
 
-    Dx = D * (vx / v)
-    Dz = D * (vz / v)
+    if v > 1e-3: # to ensure drag direction isn't messed up at low velocities
+        Dx = D * (vx / v)
+        Dz = D * (vz / v)
+    else:
+        Dx, Dz = 0.0, 0.0
+    
+    #Dx = D * (vx / v)
+    #Dz = D * (vz / v)
 
+    m = max(m,1e-3)
+    
     # Equations of motion
     dvx_dt = (Tx - Dx) / m
     dvz_dt = (Tz - Dz) / m - g
