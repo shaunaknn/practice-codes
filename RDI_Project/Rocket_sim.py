@@ -115,6 +115,8 @@ def rocket_ode(t, y):
 
     Ma = v / a
 
+    q = 0.5 * rho * v**2
+    
     Cd = drag_coefficient(Ma)
 
     D = 0.5 * rho * Cd * A * v**2
@@ -209,6 +211,15 @@ plt.plot(t, Mach)
 plt.xlabel("Time (s)")
 plt.ylabel("Mach Number")
 plt.title("Mach vs Time")
+plt.grid()
+
+Cd_vals = np.array([drag_coefficient(Mi) for Mi in Mach])
+
+plt.figure()
+plt.plot(t, Cd_vals)
+plt.xlabel("Time (s)")
+plt.ylabel("Cd")
+plt.title("Drag Coefficient vs Time")
 plt.grid()
 
 plt.show()
