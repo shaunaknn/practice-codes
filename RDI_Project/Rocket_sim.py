@@ -9,8 +9,6 @@ R_earth = 6371000      # Earth radius (m)
 def gravity(h): # Newton's law of gravity
     return g0 * (R_earth / (R_earth + h))**2
 
-# c = np.sqrt(gamma*R_air*T)
-
 # Basic atmosphere model
 #def air_density(h):
 #    return rho0 * np.exp(-h / H)
@@ -56,10 +54,24 @@ def isa_atmosphere(h):
     rho = p / (R_air * T)
     return T, p, rho
 
+def drag_coefficient(M):
+    """
+    Simple compressible Cd model:
+    captures subsonic, transonic drag rise, and supersonic behavior
+    """
+    if M < 0.8: # subsonic
+        return 0.5
+    elif M < 1.2: # transonic drag rise
+        return 0.5 + 0.4 * (M - 0.8) / 0.4
+    elif M < 5: # supersonic decay
+        return 0.9 - 0.3 * (M - 1.2) / 3.8
+    else:
+        return 0.6
+
 H = 8500               # Scale height (m)
 
 # Aerodynamic parameters
-Cd = 0.5               # Drag coefficient
+#Cd = 0.5               # Drag coefficient
 A = 0.1                # Cross-sectional area (m^2)
 
 # Rocket parameters
@@ -97,7 +109,14 @@ def rocket_ode(t, y):
 
     # Forces
     #rho = air_density(h)
-    T, p, rho = isa_atmosphere(h)
+    T, p, rho = isa_atmosphere(h) # set temp, pressure and density from ISA
+
+    a = np.sqrt(gamma*R_air*T)
+
+    Ma = v / a
+
+    Cd = drag_coefficient(Ma)
+
     D = 0.5 * rho * Cd * A * v**2
 
     g = gravity(h)
@@ -179,6 +198,17 @@ plt.plot(t, m)
 plt.xlabel("Time (s)")
 plt.ylabel("Mass (kg)")
 plt.title("Mass vs Time")
+plt.grid()
+
+T_profile = np.array([isa_atmosphere(max(zi, 0))[0] for zi in z])
+a_profile = np.sqrt(gamma * R_air * T_profile)
+Mach = v / a_profile
+
+plt.figure()
+plt.plot(t, Mach)
+plt.xlabel("Time (s)")
+plt.ylabel("Mach Number")
+plt.title("Mach vs Time")
 plt.grid()
 
 plt.show()
