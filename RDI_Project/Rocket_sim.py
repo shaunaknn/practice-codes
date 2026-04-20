@@ -117,7 +117,9 @@ def rocket_ode(t, y):
 
     Ma = max(v / a, 1e-3)
 
-    q = 0.5 * rho * v**2
+    #q = 0.5 * rho * v**2
+    #q_vals = []
+    #q_vals.append(q)
 
     Cd = drag_coefficient(Ma)
 
@@ -148,7 +150,7 @@ def rocket_ode(t, y):
     #Dz = D * (vz / v)
 
     m = max(m,1e-3)
-    
+
     # Equations of motion
     dvx_dt = (Tx - Dx) / m
     dvz_dt = (Tz - Dz) / m - g
@@ -182,7 +184,31 @@ m = sol.y[4]
 
 v = np.sqrt(vx**2 + vz**2)
 
+# Compute atmosphere properties along trajectory
+rho_profile = np.array([isa_atmosphere(max(zi, 0))[2] for zi in z])
+
+# Dynamic pressure
+q = 0.5 * rho_profile * v**2
+
+q_max = np.max(q)
+idx_max_q = np.argmax(q)
+
+t_max_q = t[idx_max_q]
+z_max_q = z[idx_max_q]
+v_max_q = v[idx_max_q]
+
+print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.2f} km")
+
 # Plotting
+
+plt.figure()
+plt.plot(t, q)
+plt.axvline(t_max_q, linestyle='--', label='Max-Q')
+plt.xlabel("Time (s)")
+plt.ylabel("Dynamic Pressure (Pa)")
+plt.title("Dynamic Pressure vs Time")
+plt.legend()
+plt.grid()
 
 plt.figure()
 plt.plot(x/1000, z/1000)
