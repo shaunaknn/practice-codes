@@ -140,18 +140,10 @@ def rocket_ode(t, y):
     a_prop = max(a_prop, 0.0)
 
     # Throttle based on q limit vs g limit
-    throttle_q = q_limit / (q + 1e-6) if q > q_limit else 1.0
-
-    if a_prop > a_max:
-        throttle_g = a_max / a_prop
-    else:
-        throttle_g = 1.0
-
-    # Actual throttle applied
-    if thrust_nominal > 0:
-        throttle = min(1.0, throttle_q, throttle_g)
-    else:
-        throttle = 0.0 # no point in throttle when thrust_nominal is zero
+    throttle_q = min(1.0, q_limit / (q + 1e-6))
+    throttle_g = min(1.0, a_max / (a_prop + 1e-9))
+    throttle = throttle_q if thrust_nominal > 0 else 0.0
+    throttle = min(throttle, throttle_g)
     
     # Altered thrust and mass flow rate
     thrust = thrust_nominal * throttle
@@ -224,10 +216,47 @@ print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.
 
 # Plotting
 
-# g load plot
-ax = np.gradient(vx, t)
-az = np.gradient(vz, t)
-a_total = np.sqrt(ax**2 + az**2) / g0
+# g-load (acceleration) vs time plot
+a_total = []
+
+for i in range(len(t)):
+    h = max(z[i], 0)
+    T_atm, _, rho = isa_atmosphere(h)
+
+    v_i = v[i] + 1e-6
+    a_sound = np.sqrt(gamma * R_air * T_atm)
+    M_i = v_i / (a_sound + 1e-9)
+
+    Cd_i = drag_coefficient(M_i)
+    D_i = 0.5 * rho * Cd_i * A * v_i**2
+
+    if v_i > 1e-6:
+        Dx = D_i * vx[i] / v_i
+        Dz = D_i * vz[i] / v_i
+    else:
+        Dx, Dz = 0.0, 0.0
+
+    if t[i] <= burn_time and m[i] > mf:
+        thrust = Th
+    else:
+        thrust = 0.0
+
+    if v_i > 1e-6:
+        ux = vx[i] / v_i
+        uz = vz[i] / v_i
+    else:
+        ux, uz = 0.0, 1.0
+
+    Tx = thrust * ux
+    Tz = thrust * uz
+
+    ax_i = (Tx - Dx) / m[i]
+    az_i = (Tz - Dz) / m[i] - gravity(h)
+
+    g_load = np.sqrt(ax_i**2 + (az_i + gravity(h))**2) / g0
+    a_total.append(g_load)
+
+a_total = np.array(a_total)
 
 plt.figure()
 plt.plot(t, a_total)
@@ -238,6 +267,7 @@ plt.title("g-load vs Time")
 plt.legend()
 plt.grid()
 
+# Dynamic Pressure vs time plot
 plt.figure()
 plt.plot(t, q)
 plt.axvline(t_max_q, linestyle='--', label='Max-Q')
@@ -250,6 +280,7 @@ plt.scatter(t_max_q, q_max)
 plt.legend()
 plt.grid()
 
+# Rocket trajectory plot
 plt.figure()
 plt.plot(x/1000, z/1000)
 plt.xlabel("Downrange Distance (km)")
@@ -257,43 +288,59 @@ plt.ylabel("Altitude (km)")
 plt.title("Rocket Trajectory")
 plt.grid()
 
+# Rocket altitude plot
 plt.figure()
 plt.plot(t, z/1000)
+plt.axvline(burn_time, linestyle=':', label='burnout')
 plt.xlabel("Time (s)")
 plt.ylabel("Altitude (km)")
 plt.title("Altitude vs Time")
+plt.legend()
 plt.grid()
 
+# Rocket velocity vs time plot
 plt.figure()
 plt.plot(t, v)
+plt.axvline(burn_time, linestyle=':', label='burnout')
 plt.xlabel("Time (s)")
 plt.ylabel("Velocity (m/s)")
 plt.title("Velocity vs Time")
+plt.legend()
 plt.grid()
 
+# Rocket mass vs time plot
 plt.figure()
 plt.plot(t, m)
+plt.axvline(burn_time, linestyle=':', label='burnout')
 plt.xlabel("Time (s)")
 plt.ylabel("Mass (kg)")
 plt.title("Mass vs Time")
+plt.legend()
 plt.grid()
 
+# Ma and Cd plots
 a_profile = np.sqrt(gamma * R_air * T_profile)
 Mach = v / (a_profile + 1e-9)
-
 Cd_vals = np.array([drag_coefficient(Mi) for Mi in Mach])
 
-fig, ax1 = plt.subplots()
+# Mach vs Time
+plt.figure()
+plt.plot(t, Mach)
+plt.axvline(burn_time, linestyle=':', label='burnout')
+plt.xlabel("Time (s)")
+plt.ylabel("Mach")
+plt.title("Mach vs Time")
+plt.legend()
+plt.grid()
 
-ax1.plot(t, Mach)
-ax1.set_xlabel("Time (s)")
-ax1.set_ylabel("Mach")
-
-ax2 = ax1.twinx()
-ax2.plot(t, Cd_vals, linestyle='--')
-ax2.set_ylabel("Cd")
-
-plt.title("Mach & Cd vs Time")
+# Cd vs Time
+plt.figure()
+plt.plot(t, Cd_vals)
+plt.axvline(burn_time, linestyle=':', label='burnout')
+plt.xlabel("Time (s)")
+plt.ylabel("Cd")
+plt.title("Drag Coefficient vs Time")
+plt.legend()
 plt.grid()
 
 plt.show()
