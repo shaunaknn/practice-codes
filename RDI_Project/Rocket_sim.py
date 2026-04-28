@@ -50,10 +50,13 @@ def isa_atmosphere(h):
     elif h >= 20000 and h < 32000:
         T = T20 + L_ustr*(h - 20000)
         p = p20 * (T / T20)**(-g0/ (L_ustr* R_air))
-    else: # exponential extension above 32km
+    elif h < 80000:
         T = T20 + L_ustr*(32000 - 20000)
         p = p20 * (T / T20)**(-g0/ (L_ustr* R_air)) * np.exp(-g0 * (h - 32000) / (R_air * T))
-    
+    else:
+        T = 200.0
+        p = 1e-9
+
     rho = p / (R_air * T)
     return T, p, rho
 
@@ -76,10 +79,10 @@ def drag_coefficient(M):
 A = 0.1                 # Cross-sectional area (m^2)
 
 # Rocket parameters
-Th = 15000              # Thrust (N)
+Th = 20000              # Thrust (N)
 Isp = 300               # Specific impulse (s)
 
-m0 = 500                # Initial mass (kg)
+m0 = 400                # Initial mass (kg)
 mf = 200                # Final mass (kg)
 
 mdot = Th / (Isp * g0)  # Mass flow rate (kg/s)
@@ -107,17 +110,14 @@ def rocket_ode(t, y):
 
     g = gravity(h)
     
-    # Gravity-based turn
-    if t < 5:
-        frac = t / 5
-        theta = np.deg2rad(90 - 5*frac)
-        ux = np.cos(theta)
-        uz = np.sin(theta)
-    elif v > 1e-6:
-        ux = vx / v
-        uz = vz / v
+    # Simple pitch program (time-based)
+    if t < 20:
+        theta = np.deg2rad(90)   # stay vertical longer
+    elif t < 80:
+        frac = (t - 20) / 60
+        theta = np.deg2rad(90 - 50*frac)  # slow pitch
     else:
-        ux, uz = 0.0, 1.0
+        theta = np.deg2rad(40)
     
     # nominal thrust
     if t <= burn_time and m > mf: # can only thrust if fuel exists
@@ -128,26 +128,14 @@ def rocket_ode(t, y):
         mdot_nominal = 0.0
 
     if v > 1e-6:
-        D_along_thrust = D * (vx*ux + vz*uz) / v
         Dx = D * vx / v
         Dz = D * vz / v
     else:
-        D_along_thrust = 0.0
         Dx, Dz = 0.0, 0.0
 
-    # felt acceleration by rocket in rocket frame
-    a_prop = (thrust_nominal - D_along_thrust) / m
-    a_prop = max(a_prop, 0.0)
-
-    # Throttle based on q limit vs g limit
-    throttle_q = min(1.0, q_limit / (q + 1e-6))
-    throttle_g = min(1.0, a_max / (a_prop + 1e-9))
-    throttle = throttle_q if thrust_nominal > 0 else 0.0
-    throttle = min(throttle, throttle_g)
-    
-    # Altered thrust and mass flow rate
-    thrust = thrust_nominal * throttle
-    dm_dt = -mdot_nominal * throttle
+    # Constant thrust (no throttle)
+    thrust = thrust_nominal
+    dm_dt = -mdot_nominal
 
     Tx = thrust * ux
     Tz = thrust * uz
@@ -216,62 +204,9 @@ print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.
 
 # Plotting
 
-# g-load (acceleration) vs time plot
-a_total = []
-
-for i in range(len(t)):
-    h = max(z[i], 0)
-    T_atm, _, rho = isa_atmosphere(h)
-
-    v_i = v[i] + 1e-6
-    a_sound = np.sqrt(gamma * R_air * T_atm)
-    M_i = v_i / (a_sound + 1e-9)
-
-    Cd_i = drag_coefficient(M_i)
-    D_i = 0.5 * rho * Cd_i * A * v_i**2
-
-    if v_i > 1e-6:
-        Dx = D_i * vx[i] / v_i
-        Dz = D_i * vz[i] / v_i
-    else:
-        Dx, Dz = 0.0, 0.0
-
-    if t[i] <= burn_time and m[i] > mf:
-        thrust = Th
-    else:
-        thrust = 0.0
-
-    if v_i > 1e-6:
-        ux = vx[i] / v_i
-        uz = vz[i] / v_i
-    else:
-        ux, uz = 0.0, 1.0
-
-    Tx = thrust * ux
-    Tz = thrust * uz
-
-    ax_i = (Tx - Dx) / m[i]
-    az_i = (Tz - Dz) / m[i] - gravity(h)
-
-    g_load = np.sqrt(ax_i**2 + (az_i + gravity(h))**2) / g0
-    a_total.append(g_load)
-
-a_total = np.array(a_total)
-
-plt.figure()
-plt.plot(t, a_total)
-plt.axhline(g_limit, linestyle='--', label='g-limit')
-plt.xlabel("Time (s)")
-plt.ylabel("Acceleration (g)")
-plt.title("g-load vs Time")
-plt.legend()
-plt.grid()
-
 # Dynamic Pressure vs time plot
 plt.figure()
 plt.plot(t, q)
-plt.axvline(t_max_q, linestyle='--', label='Max-Q')
-plt.axhline(q_limit, linestyle='--', label='q-limit')
 plt.axvline(burn_time, linestyle=':', label='burnout')
 plt.xlabel("Time (s)")
 plt.ylabel("Dynamic Pressure (Pa)")
