@@ -9,6 +9,11 @@ R_earth = 6371000      # Earth radius (m)
 def gravity(h): # Newton's law of gravity
     return g0 * (R_earth / (R_earth + h))**2
 
+g_limit = 4.0          # maximum g force tolerated by rocket
+a_max = g_limit*g0     # max acceleration tolerable
+
+q_limit = 50000 # Maximum allowed dynamic pressure in Pa
+
 # Basic atmosphere model
 #def air_density(h):
 #    return rho0 * np.exp(-h / H)
@@ -28,17 +33,17 @@ p0 = 101325            # Sea-level pressure (Pa)
 # Lower Stratorsphere - 11 - 20 km
 T11 = 216.65           # Temperature at 11 km (constant)
 p11 = 22632            # Pressure at 11 km
-rho11 = 0.364          # Density at 11 km (kg/m^3)
+#rho11 = 0.364          # Density at 11 km (kg/m^3)
 
 # Upper Stratosphere - 20 - 32 km
 T20 = 216.65           # Temperature at 20 km
 L_ustr = 0.001         # Temperature lapse rate in upper stratosphere
 p20 = 5474.88          # Pressure at 20 km
-rho20 = 0.088          # Density at 20 km (kg/m^3)
+#rho20 = 0.088          # Density at 20 km (kg/m^3)
 
 def isa_atmosphere(h):
     '''
-    returns T(h), rho(h) and p(h) at given height
+    returns Temperature, Pressure and Density at a given height
     '''
     if h < 11000:  # Troposphere
         T = T0 + L_tr * h
@@ -56,6 +61,7 @@ def isa_atmosphere(h):
     rho = p / (R_air * T)
     return T, p, rho
 
+#Cd = 0.5               # Drag coefficient
 def drag_coefficient(M):
     """
     Simple compressible Cd model:
@@ -70,39 +76,34 @@ def drag_coefficient(M):
     else:
         return 0.6
 
-#H = 8500               # Scale height (m)
-
-# Aerodynamic parameters
-#Cd = 0.5               # Drag coefficient
-A = 0.1                # Cross-sectional area (m^2)
+# Geometric parameters
+A = 0.1                 # Cross-sectional area (m^2)
 
 # Rocket parameters
 Th = 15000              # Thrust (N)
-Isp = 300              # Specific impulse (s)
+Isp = 300               # Specific impulse (s)
 
-m0 = 500               # Initial mass (kg)
-mf = 200               # Final mass (kg)
+m0 = 500                # Initial mass (kg)
+mf = 200                # Final mass (kg)
 
 mdot = Th / (Isp * g0)  # Mass flow rate (kg/s)
-burn_time = (m0 - mf) / mdot
+burn_time = (m0 - mf) / mdot # Burning time (s)
 
 # Pitch Program
+#def pitch_program(t):
+#    """
+#    Simple gravity turn:
+#    - Start vertical
+#    - Gradually tilt over time
+#    """
+#    if t < 10:
+#        return np.deg2rad(90)  # vertical
+#    elif t < 50:
+#        return np.deg2rad(90 - 0.8 * (t - 10))  # gradual tilt
+#    else:
+#        return np.deg2rad(50)  # near horizontal
 
-def pitch_program(t):
-    """
-    Simple gravity turn:
-    - Start vertical
-    - Gradually tilt over time
-    """
-    if t < 10:
-        return np.deg2rad(90)  # vertical
-    elif t < 50:
-        return np.deg2rad(90 - 0.8 * (t - 10))  # gradual tilt
-    else:
-        return np.deg2rad(50)  # near horizontal
-
-# ODE System
-
+# Rocket ODE System
 def rocket_ode(t, y):
     x, z, vx, vz, m = y
 
@@ -117,7 +118,7 @@ def rocket_ode(t, y):
 
     Ma = max(v / a, 1e-3)
 
-    #q = 0.5 * rho * v**2
+    q = 0.5 * rho * v**2
     #q_vals = []
     #q_vals.append(q)
 
@@ -127,29 +128,77 @@ def rocket_ode(t, y):
 
     g = gravity(h)
 
-    # Thrust only during burn
-    if t <= burn_time and m > mf:
-        thrust = Th
-        dm_dt = -mdot
+    # Thrust only during burn & if fuel exists
+    #if t <= burn_time and m > mf:
+    #    thrust = Th
+    #    dm_dt = -mdot
+    #else:
+    #    thrust = 0
+    #    dm_dt = 0
+    
+    # gravity based turn direction
+    if t < 5: # initial tilt by 5 deg to induce x velocity
+        theta0 = np.deg2rad(85)
+        ux = np.cos(theta0)
+        uz = np.sin(theta0)
+    elif v > 1e-6: # from 5s, once non-zero velocity starts, use v direction
+        ux = vx / v
+        uz = vz / v
     else:
-        thrust = 0
-        dm_dt = 0
+        ux, uz = 0.0, 1.0
+    
+    # nominal thrust
+    if t <= burn_time and m > mf:
+        thrust_nominal = Th
+        mdot_nominal = mdot
+    else:
+        thrust_nominal = 0.0
+        mdot_nominal = 0.0
 
-    theta = pitch_program(t)
-
-    Tx = thrust * np.cos(theta)
-    Tz = thrust * np.sin(theta)
-
+    # Drag direction
     if v > 1e-3: # to ensure drag direction isn't messed up at low velocities
         Dx = D * (vx / v)
         Dz = D * (vz / v)
     else:
         Dx, Dz = 0.0, 0.0
-    
-    #Dx = D * (vx / v)
-    #Dz = D * (vz / v)
+
+    # Acceleration pertaining to nominal thrust
+    Tx_nom = thrust_nominal * ux
+    Tz_nom = thrust_nominal * uz
 
     m = max(m,1e-3)
+
+    ax_nom = (Tx_nom - Dx) / m
+    az_nom = (Tz_nom - Dz) / m
+
+    # this is the acceleration felt by the structure, not actual acceleration
+    a_prop = np.sqrt(ax_nom**2 + az_nom**2) # excludes g
+
+    # Throttle based on q limit vs g limit
+    if q > q_limit:
+        throttle_q = q_limit / q
+    else:
+        throttle_q = 1.0
+
+    if a_prop > a_max:
+        throttle_g = a_max / a_prop
+    else:
+        throttle_g = 1.0
+
+    # Actual throttle applied
+    throttle = min(1.0, throttle_q, throttle_g)
+
+    # Altered thrust and mass flow rate
+    thrust = thrust_nominal * throttle
+    dm_dt = -mdot_nominal * throttle
+
+    Tx = thrust * ux
+    Tz = thrust * uz
+
+    #theta = pitch_program(t)
+
+    #Tx = thrust * np.cos(theta)
+    #Tz = thrust * np.sin(theta)
 
     # Equations of motion
     dvx_dt = (Tx - Dx) / m
@@ -158,7 +207,6 @@ def rocket_ode(t, y):
     return [vx, vz, dvx_dt, dvz_dt, dm_dt]
 
 # Initial Conditions
-
 x0 = 0
 z0 = 0
 vx0 = 0
@@ -171,7 +219,6 @@ t_span = (0, 200)
 t_eval = np.linspace(0, 200, 1000)
 
 # Solve ODE
-
 sol = solve_ivp(rocket_ode, t_span, y0, t_eval=t_eval, rtol=1e-6, atol=1e-9)
 
 # Extract results
@@ -200,6 +247,57 @@ v_max_q = v[idx_max_q]
 print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.2f} km")
 
 # Plotting
+
+throttle_profile = []
+
+for i in range(len(t)):
+    h = max(z[i], 0)
+    T_atm_i, _, rho_i = isa_atmosphere(h)
+
+    v_i = v[i]
+    q_i = 0.5 * rho_i * v_i**2
+
+    a_i = np.sqrt(gamma * R_air * T_atm_i)
+    M_i = max(v_i / a_i, 1e-3)
+    Cd_i = drag_coefficient(M_i)
+
+    D_i = 0.5 * rho_i * Cd_i * A * v_i**2
+
+    if v_i > 1e-3:
+        Dx_i = D_i * (vx[i] / v_i)
+        Dz_i = D_i * (vz[i] / v_i)
+    else:
+        Dx_i, Dz_i = 0.0, 0.0
+
+    # thrust direction
+    if i == 0 or t[i] < 5:
+        theta0 = np.deg2rad(85)
+        ux_i = np.cos(theta0)
+        uz_i = np.sin(theta0)
+    else:
+        ux_i = vx[i] / (v_i + 1e-6)
+        uz_i = vz[i] / (v_i + 1e-6)
+
+    Tx_nom_i = Th * ux_i
+    Tz_nom_i = Th * uz_i
+
+    ax_nom_i = (Tx_nom_i - Dx_i) / m[i]
+    az_nom_i = (Tz_nom_i - Dz_i) / m[i]
+
+    a_prop_i = np.sqrt(ax_nom_i**2 + az_nom_i**2)
+
+    # constraints
+    tq = q_limit / q_i if q_i > q_limit else 1.0
+    tg = a_max / a_prop_i if a_prop_i > a_max else 1.0
+
+    throttle_profile.append(min(1.0, tq, tg))
+
+plt.figure()
+plt.plot(t, throttle_profile)
+plt.xlabel("Time (s)")
+plt.ylabel("Throttle")
+plt.title("Throttle vs Time")
+plt.grid()
 
 plt.figure()
 plt.plot(t, q)
