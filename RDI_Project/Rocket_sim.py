@@ -14,10 +14,6 @@ a_max = g_limit*g0     # max acceleration tolerable
 
 q_limit = 50000 # Maximum allowed dynamic pressure in Pa
 
-# Basic atmosphere model
-#def air_density(h):
-#    return rho0 * np.exp(-h / H)
-
 ### ISA Atmosphere model
 
 # General Constants
@@ -89,20 +85,6 @@ mf = 200                # Final mass (kg)
 mdot = Th / (Isp * g0)  # Mass flow rate (kg/s)
 burn_time = (m0 - mf) / mdot # Burning time (s)
 
-# Pitch Program
-#def pitch_program(t):
-#    """
-#    Simple gravity turn:
-#    - Start vertical
-#    - Gradually tilt over time
-#    """
-#    if t < 10:
-#        return np.deg2rad(90)  # vertical
-#    elif t < 50:
-#        return np.deg2rad(90 - 0.8 * (t - 10))  # gradual tilt
-#    else:
-#        return np.deg2rad(50)  # near horizontal
-
 # Rocket ODE System
 def rocket_ode(t, y):
     x, z, vx, vz, m = y
@@ -119,22 +101,12 @@ def rocket_ode(t, y):
     Ma = max(v / a, 1e-3)
 
     q = 0.5 * rho * v**2
-    #q_vals = []
-    #q_vals.append(q)
 
     Cd = drag_coefficient(Ma)
 
     D = 0.5 * rho * Cd * A * v**2
 
     g = gravity(h)
-
-    # Thrust only during burn & if fuel exists
-    #if t <= burn_time and m > mf:
-    #    thrust = Th
-    #    dm_dt = -mdot
-    #else:
-    #    thrust = 0
-    #    dm_dt = 0
     
     # gravity based turn direction
     if t < 5: # initial tilt by 5 deg to induce x velocity
@@ -148,7 +120,7 @@ def rocket_ode(t, y):
         ux, uz = 0.0, 1.0
     
     # nominal thrust
-    if t <= burn_time and m > mf:
+    if t <= burn_time and m > mf: # can only thrust if fuel exists
         thrust_nominal = Th
         mdot_nominal = mdot
     else:
