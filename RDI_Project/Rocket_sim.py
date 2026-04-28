@@ -189,9 +189,11 @@ hit_ground.direction = -1
 sol = solve_ivp(
     rocket_ode, t_span, y0, 
     t_eval=t_eval, 
-    events = hit_ground(t,y),
+    events = hit_ground,
     rtol=1e-6, atol=1e-9
     )
+
+print(sol.message)
 
 # Extract results
 t = sol.t
@@ -276,6 +278,7 @@ plt.ylabel("Mass (kg)")
 plt.title("Mass vs Time")
 plt.grid()
 
+a_profile = np.sqrt(gamma * R_air * T_profile)
 Mach = v / (a_profile + 1e-9)
 
 Cd_vals = np.array([drag_coefficient(Mi) for Mi in Mach])
