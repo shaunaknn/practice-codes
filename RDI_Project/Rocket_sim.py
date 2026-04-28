@@ -88,6 +88,7 @@ burn_time = (m0 - mf) / mdot # Burning time (s)
 # Rocket ODE System
 def rocket_ode(t, y):
     x, z, vx, vz, m = y
+    m = max(m,1e-3)
 
     v = np.sqrt(vx**2 + vz**2) + 1e-6  # avoid division by zero
     h = max(z, 0)
@@ -138,8 +139,6 @@ def rocket_ode(t, y):
     Tx_nom = thrust_nominal * ux
     Tz_nom = thrust_nominal * uz
 
-    m = max(m,1e-3)
-
     ax_nom = (Tx_nom - Dx) / m
     az_nom = (Tz_nom - Dz) / m
 
@@ -158,7 +157,10 @@ def rocket_ode(t, y):
         throttle_g = 1.0
 
     # Actual throttle applied
-    throttle = min(1.0, throttle_q, throttle_g)
+    if thrust_nominal > 0:
+        throttle = min(1.0, throttle_q, throttle_g)
+    else:
+        throttle = 0.0 # no point in throttle when thrust_nominal is zero
 
     # Altered thrust and mass flow rate
     thrust = thrust_nominal * throttle
@@ -220,6 +222,7 @@ print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.
 
 # Plotting
 
+# throttle variation plot
 throttle_profile = []
 
 for i in range(len(t)):
@@ -250,8 +253,13 @@ for i in range(len(t)):
         ux_i = vx[i] / (v_i + 1e-6)
         uz_i = vz[i] / (v_i + 1e-6)
 
-    Tx_nom_i = Th * ux_i
-    Tz_nom_i = Th * uz_i
+    if t[i] <= burn_time and m[i] > mf:
+        thrust_nom_i = Th
+    else:
+        thrust_nom_i = 0.0
+    
+    Tx_nom_i = thrust_nom_i * ux_i
+    Tz_nom_i = thrust_nom_i * uz_i
 
     ax_nom_i = (Tx_nom_i - Dx_i) / m[i]
     az_nom_i = (Tz_nom_i - Dz_i) / m[i]
@@ -271,12 +279,30 @@ plt.ylabel("Throttle")
 plt.title("Throttle vs Time")
 plt.grid()
 
+# g load plot
+a_total = []
+
+for i in range(len(t)):
+    dvx = np.gradient(vx, t)[i]
+    dvz = np.gradient(vz, t)[i]
+    a_total.append(np.sqrt(dvx**2 + dvz**2) / g0)
+
+plt.figure()
+plt.plot(t, a_total)
+plt.axhline(g_limit, linestyle='--', label='g-limit')
+plt.xlabel("Time (s)")
+plt.ylabel("Acceleration (g)")
+plt.title("g-load vs Time")
+plt.legend()
+plt.grid()
+
 plt.figure()
 plt.plot(t, q)
 plt.axvline(t_max_q, linestyle='--', label='Max-Q')
 plt.xlabel("Time (s)")
 plt.ylabel("Dynamic Pressure (Pa)")
 plt.title("Dynamic Pressure vs Time")
+plt.scatter(t_max_q, q_max)
 plt.legend()
 plt.grid()
 
@@ -312,20 +338,14 @@ T_profile = np.array([isa_atmosphere(max(zi, 0))[0] for zi in z])
 a_profile = np.sqrt(gamma * R_air * T_profile)
 Mach = v / a_profile
 
-plt.figure()
-plt.plot(t, Mach)
-plt.xlabel("Time (s)")
-plt.ylabel("Mach Number")
-plt.title("Mach vs Time")
-plt.grid()
-
 Cd_vals = np.array([drag_coefficient(Mi) for Mi in Mach])
 
 plt.figure()
-plt.plot(t, Cd_vals)
+plt.plot(t, Mach, label="Mach")
+plt.plot(t, Cd_vals, label="Cd")
 plt.xlabel("Time (s)")
-plt.ylabel("Cd")
-plt.title("Drag Coefficient vs Time")
+plt.title("Mach & Cd vs Time")
+plt.legend()
 plt.grid()
 
 plt.show()
