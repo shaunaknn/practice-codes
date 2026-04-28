@@ -44,10 +44,10 @@ def isa_atmosphere(h):
     if h < 11000:  # Troposphere
         T = T0 + L_tr * h
         p = p0 * (T / T0)**(-g0 / (L_tr * R_air)) # polytropic relation
-    elif h >= 11000 and h < 20000:  # Lower Stratosphere
+    elif h < 20000:  # Lower Stratosphere
         T = T11
         p = p11 * np.exp(-g0 * (h - 11000) / (R_air * T))
-    elif h >= 20000 and h < 32000:
+    elif h < 32000:
         T = T20 + L_ustr*(h - 20000)
         p = p20 * (T / T20)**(-g0/ (L_ustr* R_air))
     elif h < 80000:
@@ -60,7 +60,7 @@ def isa_atmosphere(h):
     rho = p / (R_air * T)
     return T, p, rho
 
-#Cd = 0.5               # Drag coefficient
+# Drag coefficient
 def drag_coefficient(M):
     """
     Simple compressible Cd model:
@@ -79,10 +79,10 @@ def drag_coefficient(M):
 A = 0.1                 # Cross-sectional area (m^2)
 
 # Rocket parameters
-Th = 20000              # Thrust (N)
+Th = 15000              # Thrust (N)
 Isp = 300               # Specific impulse (s)
 
-m0 = 400                # Initial mass (kg)
+m0 = 500                # Initial mass (kg)
 mf = 200                # Final mass (kg)
 
 mdot = Th / (Isp * g0)  # Mass flow rate (kg/s)
@@ -93,7 +93,7 @@ def rocket_ode(t, y):
     x, z, vx, vz, m = y
     m = max(m,1e-3)
 
-    v = np.sqrt(vx**2 + vz**2) + 1e-6  # avoid division by zero
+    v = max(np.sqrt(vx**2 + vz**2),1e-6)  # avoid division by zero
     h = max(z, 0)
 
     T_atm, p_atm, rho = isa_atmosphere(h) # set temp, pressure and density from ISA
@@ -111,14 +111,17 @@ def rocket_ode(t, y):
     g = gravity(h)
     
     # Simple pitch program (time-based)
-    if t < 20:
-        theta = np.deg2rad(90)   # stay vertical longer
-    elif t < 80:
-        frac = (t - 20) / 60
-        theta = np.deg2rad(90 - 50*frac)  # slow pitch
+    if t < 10:
+        theta = np.deg2rad(90)
+    elif t < 100:
+        frac = (t - 10) / 90
+        theta = np.deg2rad(90 - 70*frac)   # down to 20 deg slowly
     else:
-        theta = np.deg2rad(40)
+        theta = np.deg2rad(20)
     
+    ux = np.cos(theta)
+    uz = np.sin(theta)
+
     # nominal thrust
     if t <= burn_time and m > mf: # can only thrust if fuel exists
         thrust_nominal = Th
@@ -133,9 +136,11 @@ def rocket_ode(t, y):
     else:
         Dx, Dz = 0.0, 0.0
 
-    # Constant thrust (no throttle)
-    thrust = thrust_nominal
-    dm_dt = -mdot_nominal
+    # simple scaled throttle
+    throttle = min(1.0, (q_limit / (q + 1e-6))**0.5)
+    
+    thrust = thrust_nominal*throttle
+    dm_dt = -mdot_nominal*throttle
 
     Tx = thrust * ux
     Tz = thrust * uz
@@ -167,8 +172,8 @@ hit_ground.terminal = True
 hit_ground.direction = -1
 
 sol = solve_ivp(
-    rocket_ode, t_span, y0, 
-    t_eval=t_eval, 
+    rocket_ode, t_span, y0,
+    t_eval=t_eval,
     events = hit_ground,
     rtol=1e-6, atol=1e-9
     )
