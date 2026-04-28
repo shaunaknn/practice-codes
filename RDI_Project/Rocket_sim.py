@@ -93,13 +93,11 @@ def rocket_ode(t, y):
     v = np.sqrt(vx**2 + vz**2) + 1e-6  # avoid division by zero
     h = max(z, 0)
 
-    # Forces
-    #rho = air_density(h)
     T_atm, p_atm, rho = isa_atmosphere(h) # set temp, pressure and density from ISA
 
     a = np.sqrt(gamma*R_air*T_atm)
 
-    Ma = max(v / a, 1e-3)
+    Ma = v / (a + 1e-9)
 
     q = 0.5 * rho * v**2
 
@@ -109,12 +107,13 @@ def rocket_ode(t, y):
 
     g = gravity(h)
     
-    # gravity based turn direction
-    if t < 5: # initial tilt by 5 deg to induce x velocity
-        theta0 = np.deg2rad(85)
-        ux = np.cos(theta0)
-        uz = np.sin(theta0)
-    elif v > 1e-6: # from 5s, once non-zero velocity starts, use v direction
+    # Gravity-based turn
+    if t < 5:
+        frac = t / 5
+        theta = np.deg2rad(90 - 5*frac)
+        ux = np.cos(theta)
+        uz = np.sin(theta)
+    elif v > 1e-6:
         ux = vx / v
         uz = vz / v
     else:
@@ -128,28 +127,20 @@ def rocket_ode(t, y):
         thrust_nominal = 0.0
         mdot_nominal = 0.0
 
-    # Drag direction
-    if v > 1e-3: # to ensure drag direction isn't messed up at low velocities
-        Dx = D * (vx / v)
-        Dz = D * (vz / v)
+    if v > 1e-6:
+        D_along_thrust = D * (vx*ux + vz*uz) / v
+        Dx = D * vx / v
+        Dz = D * vz / v
     else:
+        D_along_thrust = 0.0
         Dx, Dz = 0.0, 0.0
 
-    # Acceleration pertaining to nominal thrust
-    Tx_nom = thrust_nominal * ux
-    Tz_nom = thrust_nominal * uz
-
-    ax_nom = (Tx_nom - Dx) / m
-    az_nom = (Tz_nom - Dz) / m
-
-    # this is the acceleration felt by the structure, not actual acceleration
-    a_prop = np.sqrt(ax_nom**2 + az_nom**2) # excludes g
+    # felt acceleration by rocket in rocket frame
+    a_prop = (thrust_nominal - D_along_thrust) / m
+    a_prop = max(a_prop, 0.0)
 
     # Throttle based on q limit vs g limit
-    if q > q_limit:
-        throttle_q = q_limit / q
-    else:
-        throttle_q = 1.0
+    throttle_q = q_limit / (q + 1e-6) if q > q_limit else 1.0
 
     if a_prop > a_max:
         throttle_g = a_max / a_prop
@@ -161,18 +152,13 @@ def rocket_ode(t, y):
         throttle = min(1.0, throttle_q, throttle_g)
     else:
         throttle = 0.0 # no point in throttle when thrust_nominal is zero
-
+    
     # Altered thrust and mass flow rate
     thrust = thrust_nominal * throttle
     dm_dt = -mdot_nominal * throttle
 
     Tx = thrust * ux
     Tz = thrust * uz
-
-    #theta = pitch_program(t)
-
-    #Tx = thrust * np.cos(theta)
-    #Tz = thrust * np.sin(theta)
 
     # Equations of motion
     dvx_dt = (Tx - Dx) / m
@@ -193,7 +179,19 @@ t_span = (0, 200)
 t_eval = np.linspace(0, 200, 1000)
 
 # Solve ODE
-sol = solve_ivp(rocket_ode, t_span, y0, t_eval=t_eval, rtol=1e-6, atol=1e-9)
+
+def hit_ground(t, y):
+    return y[1]
+
+hit_ground.terminal = True
+hit_ground.direction = -1
+
+sol = solve_ivp(
+    rocket_ode, t_span, y0, 
+    t_eval=t_eval, 
+    events = hit_ground(t,y),
+    rtol=1e-6, atol=1e-9
+    )
 
 # Extract results
 t = sol.t
@@ -206,7 +204,9 @@ m = sol.y[4]
 v = np.sqrt(vx**2 + vz**2)
 
 # Compute atmosphere properties along trajectory
-rho_profile = np.array([isa_atmosphere(max(zi, 0))[2] for zi in z])
+atm = np.array([isa_atmosphere(max(zi, 0)) for zi in z])
+T_profile = atm[:,0]
+rho_profile = atm[:,2]
 
 # Dynamic pressure
 q = 0.5 * rho_profile * v**2
@@ -222,70 +222,10 @@ print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.
 
 # Plotting
 
-# throttle variation plot
-throttle_profile = []
-
-for i in range(len(t)):
-    h = max(z[i], 0)
-    T_atm_i, _, rho_i = isa_atmosphere(h)
-
-    v_i = v[i]
-    q_i = 0.5 * rho_i * v_i**2
-
-    a_i = np.sqrt(gamma * R_air * T_atm_i)
-    M_i = max(v_i / a_i, 1e-3)
-    Cd_i = drag_coefficient(M_i)
-
-    D_i = 0.5 * rho_i * Cd_i * A * v_i**2
-
-    if v_i > 1e-3:
-        Dx_i = D_i * (vx[i] / v_i)
-        Dz_i = D_i * (vz[i] / v_i)
-    else:
-        Dx_i, Dz_i = 0.0, 0.0
-
-    # thrust direction
-    if i == 0 or t[i] < 5:
-        theta0 = np.deg2rad(85)
-        ux_i = np.cos(theta0)
-        uz_i = np.sin(theta0)
-    else:
-        ux_i = vx[i] / (v_i + 1e-6)
-        uz_i = vz[i] / (v_i + 1e-6)
-
-    if t[i] <= burn_time and m[i] > mf:
-        thrust_nom_i = Th
-    else:
-        thrust_nom_i = 0.0
-    
-    Tx_nom_i = thrust_nom_i * ux_i
-    Tz_nom_i = thrust_nom_i * uz_i
-
-    ax_nom_i = (Tx_nom_i - Dx_i) / m[i]
-    az_nom_i = (Tz_nom_i - Dz_i) / m[i]
-
-    a_prop_i = np.sqrt(ax_nom_i**2 + az_nom_i**2)
-
-    # constraints
-    tq = q_limit / q_i if q_i > q_limit else 1.0
-    tg = a_max / a_prop_i if a_prop_i > a_max else 1.0
-
-    throttle_profile.append(min(1.0, tq, tg))
-
-plt.figure()
-plt.plot(t, throttle_profile)
-plt.xlabel("Time (s)")
-plt.ylabel("Throttle")
-plt.title("Throttle vs Time")
-plt.grid()
-
 # g load plot
-a_total = []
-
-for i in range(len(t)):
-    dvx = np.gradient(vx, t)[i]
-    dvz = np.gradient(vz, t)[i]
-    a_total.append(np.sqrt(dvx**2 + dvz**2) / g0)
+ax = np.gradient(vx, t)
+az = np.gradient(vz, t)
+a_total = np.sqrt(ax**2 + az**2) / g0
 
 plt.figure()
 plt.plot(t, a_total)
@@ -299,6 +239,8 @@ plt.grid()
 plt.figure()
 plt.plot(t, q)
 plt.axvline(t_max_q, linestyle='--', label='Max-Q')
+plt.axhline(q_limit, linestyle='--', label='q-limit')
+plt.axvline(burn_time, linestyle=':', label='burnout')
 plt.xlabel("Time (s)")
 plt.ylabel("Dynamic Pressure (Pa)")
 plt.title("Dynamic Pressure vs Time")
@@ -334,18 +276,21 @@ plt.ylabel("Mass (kg)")
 plt.title("Mass vs Time")
 plt.grid()
 
-T_profile = np.array([isa_atmosphere(max(zi, 0))[0] for zi in z])
-a_profile = np.sqrt(gamma * R_air * T_profile)
-Mach = v / a_profile
+Mach = v / (a_profile + 1e-9)
 
 Cd_vals = np.array([drag_coefficient(Mi) for Mi in Mach])
 
-plt.figure()
-plt.plot(t, Mach, label="Mach")
-plt.plot(t, Cd_vals, label="Cd")
-plt.xlabel("Time (s)")
+fig, ax1 = plt.subplots()
+
+ax1.plot(t, Mach)
+ax1.set_xlabel("Time (s)")
+ax1.set_ylabel("Mach")
+
+ax2 = ax1.twinx()
+ax2.plot(t, Cd_vals, linestyle='--')
+ax2.set_ylabel("Cd")
+
 plt.title("Mach & Cd vs Time")
-plt.legend()
 plt.grid()
 
 plt.show()
