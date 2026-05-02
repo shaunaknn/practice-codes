@@ -9,6 +9,7 @@ R_earth = 6371000      # Earth radius (m)
 def gravity(h): # Newton's law of gravity
     return g0 * (R_earth / (R_earth + h))**2
 
+# only to be used if using dynamic throttling
 g_limit = 4.0          # maximum g force tolerated by rocket
 a_max = g_limit*g0     # max acceleration tolerable
 
@@ -160,7 +161,7 @@ vz0 = 0
 y0 = [x0, z0, vx0, vz0, m0]
 
 # Time span
-t_span = (0, 200)
+t_span = (0, 250)
 t_eval = np.linspace(0, 200, 1000)
 
 # Solve ODE
@@ -207,6 +208,16 @@ v_max_q = v[idx_max_q]
 
 print(f"Max-Q: {q_max:.2f} Pa at t = {t_max_q:.2f} s, altitude = {z_max_q/1000:.2f} km")
 
+# Maximum altitude (apogee)
+idx_max_alt = np.argmax(z)
+z_max = z[idx_max_alt]
+t_max_alt = t[idx_max_alt]
+
+print(f"Max altitude: {z_max/1000:.2f} km at t = {t_max_alt:.2f} s")
+
+# Burn time
+print(f"Burnout time: {burn_time:.2f} s")
+
 # Plotting
 
 # Dynamic Pressure vs time plot
@@ -232,6 +243,9 @@ plt.grid()
 plt.figure()
 plt.plot(t, z/1000)
 plt.axvline(burn_time, linestyle=':', label='burnout')
+plt.scatter(t_max_alt, z_max/1000)
+plt.axvline(t_max_alt, linestyle='--', label='apogee')
+plt.axhline(z_max/1000, linestyle='--')
 plt.xlabel("Time (s)")
 plt.ylabel("Altitude (km)")
 plt.title("Altitude vs Time")
